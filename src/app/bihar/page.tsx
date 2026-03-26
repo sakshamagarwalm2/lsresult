@@ -54,7 +54,10 @@ export default function BiharPage() {
   const [searchRollNo, setSearchRollNo] = useState('');
   const [logMessages, setLogMessages] = useState<string[]>([]);
   const [captchaLoading, setCaptchaLoading] = useState(false);
+  const [batch, setBatch] = useState(String(new Date().getFullYear()));
+  const [saveStatus, setSaveStatus] = useState<Record<number, 'saving' | 'saved' | 'error'>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasFetchedRef = useRef(false);
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -84,10 +87,12 @@ export default function BiharPage() {
   };
 
   useEffect(() => {
-    if (students.length > 0 && !csrfToken) {
+    if (students.length > 0 && !csrfToken && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
       fetchInitialData();
     }
-  }, [students.length, csrfToken]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students.length]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -216,6 +221,43 @@ export default function BiharPage() {
     }
   };
 
+  const saveToDb = async (studentId: number, resultData: ResultData) => {
+    setSaveStatus(prev => ({ ...prev, [studentId]: 'saving' }));
+    try {
+      const student = students.find(s => s.id === studentId);
+      const payload = {
+        rollCode: resultData.rollCode,
+        rollNumber: resultData.rollNumber,
+        name: student?.name || resultData.studentName,
+        mobile: student?.mobile || '',
+        fatherName: resultData.fatherName,
+        schoolName: resultData.schoolName,
+        faculty: resultData.faculty,
+        registrationNumber: resultData.registrationNumber,
+        subjects: resultData.subjects,
+        total: resultData.aggregateMarks,
+        percentage: resultData.percentage,
+        division: resultData.resultDivision,
+        board: 'BIHAR',
+        batch,
+      };
+      const res = await fetch('/api/save-results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setSaveStatus(prev => ({ ...prev, [studentId]: 'saved' }));
+        addLog(`Saved ${resultData.studentName} to database`);
+      } else {
+        throw new Error('Save failed');
+      }
+    } catch {
+      setSaveStatus(prev => ({ ...prev, [studentId]: 'error' }));
+      addLog(`Failed to save to database`);
+    }
+  };
+
   const fetchResult = async (student: Student, captcha: string) => {
     addLog(`Fetching result for: ${student.name || student.rollNo}`);
     addLog(`Roll Code: ${student.rollCode}, Roll No: ${student.rollNo}, Captcha: ${captcha}`);
@@ -254,6 +296,7 @@ export default function BiharPage() {
             )
           );
           addLog(`Result fetched successfully for ${resultData.studentName}`);
+          saveToDb(student.id, resultData);
         } else {
           throw new Error('Failed to parse result');
         }
@@ -287,6 +330,14 @@ export default function BiharPage() {
       setShowModal(false);
       setCaptchaInput('');
     }
+  };
+
+  const fetchAllPendingResults = async () => {
+    const pending = students.filter(s => s.status === 'pending');
+    if (pending.length === 0) return;
+    
+    // Process the first pending student by opening the modal
+    handleGetResult(pending[0]);
   };
 
   const refreshCaptcha = () => {
@@ -365,6 +416,24 @@ export default function BiharPage() {
 
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <div className="flex flex-wrap gap-4 items-center mb-4">
+            <Link
+              href="/bihar/import"
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+            >
+              Import to Database
+            </Link>
+            <Link
+              href="/bihar/results"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+            >
+              Browse Results
+            </Link>
+            <Link
+              href="/bihar/saved"
+              className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium"
+            >
+              Saved Data
+            </Link>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="file"
@@ -383,6 +452,14 @@ export default function BiharPage() {
             >
               Search Single
             </button>
+            {students.length > 0 && pendingCount > 0 && (
+              <button
+                onClick={fetchAllPendingResults}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium animate-pulse"
+              >
+                Fetch All ({pendingCount})
+              </button>
+            )}
             {captchaCode && (
               <button
                 onClick={refreshCaptcha}
@@ -391,6 +468,16 @@ export default function BiharPage() {
                 Refresh Captcha
               </button>
             )}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-600">Batch:</label>
+              <input
+                type="text"
+                value={batch}
+                onChange={(e) => setBatch(e.target.value)}
+                className="border rounded px-2 py-1.5 w-24 text-sm text-gray-700"
+                placeholder="2024"
+              />
+            </div>
           </div>
 
           {students.length > 0 && (
@@ -689,7 +776,18 @@ export default function BiharPage() {
                             <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">Fetching...</span>
                           )}
                           {student.status === 'success' && (
-                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">Done</span>
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">Done</span>
+                              {saveStatus[student.id] === 'saving' && (
+                                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">Saving...</span>
+                              )}
+                              {saveStatus[student.id] === 'saved' && (
+                                <span className="px-2 py-1 bg-teal-100 text-teal-700 rounded text-xs">Saved</span>
+                              )}
+                              {saveStatus[student.id] === 'error' && (
+                                <span className="px-2 py-1 bg-red-100 text-red-600 rounded text-xs">Save Error</span>
+                              )}
+                            </div>
                           )}
                           {student.status === 'error' && (
                             <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">Error</span>

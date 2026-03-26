@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     );
 
     const setCookies = response.headers['set-cookie'] as string[];
-    let newCookies: Record<string, string> = {};
+    const newCookies: Record<string, string> = {};
     if (setCookies) {
       setCookies.forEach((cookie) => {
         const [pair] = cookie.split(';');
@@ -107,7 +107,7 @@ export async function GET() {
     const csrfToken = tokenMatch ? tokenMatch[1] : '';
 
     const cookies = response.headers['set-cookie'] as string[];
-    let cookieObj: Record<string, string> = {};
+    const cookieObj: Record<string, string> = {};
     if (cookies) {
       cookies.forEach((cookie) => {
         const [pair] = cookie.split(';');
